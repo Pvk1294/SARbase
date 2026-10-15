@@ -3,6 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { Attachment, AttachmentEventAction } from "@prisma/client";
 
+import {
+  applyPreArrivedScanEvents,
+  assertScanCleared,
+} from "@/lib/domain/malware-scan";
 import { log } from "@/lib/logging";
 import { prisma } from "@/lib/prisma";
 import { getFileStorageProvider } from "@/lib/storage/resolve";
@@ -708,6 +712,55 @@ export function newAttachmentStorageKey(organizationId: string): string {
   return `organizations/${organizationId}/attachments/${randomUUID()}`;
 }
 
+/**
+ * Initial scan-state fields for a new Attachment row. Objects on the
+ * "s3" provider are covered by GuardDuty Malware Protection for S3 and
+ * start PENDING — downloadable only after a verified CLEAN result for
+ * the recorded object version. Other providers have no scan pipeline
+ * and record UNKNOWN (the download gate only applies to "s3").
+ */
+/**
+ * Apply scan events that beat the row commit — best-effort only. The
+ * attachment row is already committed at this point; a failure here
+ * must never reach the create-path catch, which compensates by
+ * deleting the stored object. A missed pickup simply leaves the row
+ * PENDING (tag reconciliation and download-time retry still recover).
+ */
+async function applyPreArrivedScanEventsSafely(
+  attachment: Parameters<typeof applyPreArrivedScanEvents>[0],
+): Promise<void> {
+  try {
+    await applyPreArrivedScanEvents(attachment);
+  } catch (error) {
+    log({
+      event: "attachment.scan_preapply_failed",
+      subsystem: "attachments",
+      entityType: "Attachment",
+      entityId: attachment.id,
+      level: "error",
+      outcome: "operational_failure",
+      errorName: error instanceof Error ? error.name : "unknown",
+    });
+  }
+}
+
+export function scanInitFields(
+  storageProvider: string,
+  version: { versionId: string | null; etag: string | null },
+): {
+  scanStatus: "PENDING" | "UNKNOWN";
+  storageVersionId: string | null;
+  storageETag: string | null;
+} {
+  return storageProvider === "s3"
+    ? {
+        scanStatus: "PENDING",
+        storageVersionId: version.versionId,
+        storageETag: version.etag,
+      }
+    : { scanStatus: "UNKNOWN", storageVersionId: null, storageETag: null };
+}
+
 /* ------------------------------------------------------------------ */
 /* Upload                                                              */
 /* ------------------------------------------------------------------ */
@@ -745,7 +798,7 @@ export async function uploadAttachment(
   requireReasonForProtected(preview, options.reason);
 
   const storageKey = newAttachmentStorageKey(preview.organizationId);
-  await storage.put(storageKey, file.bytes, file.mediaType);
+  const stored = await storage.put(storageKey, file.bytes, file.mediaType);
 
   try {
     const attachment = await prisma.$transaction(async (tx) => {
@@ -761,6 +814,7 @@ export async function uploadAttachment(
           storageProvider: storage.providerName,
           storageKey,
           checksumSha256,
+          ...scanInitFields(storage.providerName, stored),
           description: options.description?.trim() || null,
           uploadedByAuthIdentityId: actorAuthIdentityId,
         },
@@ -802,6 +856,8 @@ export async function uploadAttachment(
       storageProvider: storage.providerName,
       sizeBytes: attachment.sizeBytes,
     });
+    // A scan event may have beaten the commit — apply it now.
+    await applyPreArrivedScanEventsSafely(attachment);
     return attachment;
   } catch (error) {
     // Compensation: the object exists but the metadata never committed —
@@ -997,6 +1053,9 @@ type VerifiedStagedUpload =
       finalKey: string;
       sizeBytes: number;
       checksumSha256: string;
+      /** Version identity of the promoted object — binds scan results. */
+      versionId: string | null;
+      etag: string | null;
     };
 
 /** Best-effort removal of a rejected staging object — logged, never thrown. */
@@ -1148,8 +1207,9 @@ async function verifyStagedUpload(
   // holder could re-POST the same key between this verify pass and the
   // copy — promoting bytes that never saw the signature checks and
   // recording a checksum that doesn't match. A 412 means "restart".
+  let promoted: { versionId: string | null; etag: string | null };
   try {
-    await storage.promoteObject(staged.stagingKey, staged.finalKey, {
+    promoted = await storage.promoteObject(staged.stagingKey, staged.finalKey, {
       ifMatchEtag: stat.etag ?? undefined,
     });
   } catch (error) {
@@ -1164,6 +1224,8 @@ async function verifyStagedUpload(
     finalKey: staged.finalKey,
     sizeBytes: stat.sizeBytes,
     checksumSha256: streamed.checksumSha256,
+    versionId: promoted.versionId,
+    etag: promoted.etag,
   };
 }
 
@@ -1208,6 +1270,7 @@ export async function finalizeAttachmentUpload(
           storageProvider: storage.providerName,
           storageKey: verified.finalKey,
           checksumSha256: verified.checksumSha256,
+          ...scanInitFields(storage.providerName, verified),
           description: options.description?.trim() || null,
           uploadedByAuthIdentityId: actorAuthIdentityId,
         },
@@ -1249,6 +1312,8 @@ export async function finalizeAttachmentUpload(
       storageProvider: storage.providerName,
       sizeBytes: attachment.sizeBytes,
     });
+    // A scan event may have beaten the finalize — apply it now.
+    await applyPreArrivedScanEventsSafely(attachment);
     return attachment;
   } catch (error) {
     try {
@@ -1552,6 +1617,11 @@ export async function openAttachmentDownload(
       `Storage provider '${attachment.storageProvider}' is not configured on this deployment.`,
     );
   }
+  // Central scan gate — the ONLY byte path. GuardDuty coverage exists
+  // only on "s3"; for those objects anything but a verified CLEAN for
+  // the recorded version blocks the download. Non-S3 providers have no
+  // scan pipeline and are not gated (their UNKNOWN is informational).
+  assertScanCleared(attachment);
   const object = await storage.openRead(attachment.storageKey);
   return {
     stream: object.stream,
@@ -1699,9 +1769,10 @@ export async function createOrganizationDocument(
   const displayFilename = sanitizeDisplayFilename(file.name);
   const checksumSha256 = createHash("sha256").update(file.bytes).digest("hex");
   const storageKey = newAttachmentStorageKey(organizationId);
-  await storage.put(storageKey, file.bytes, file.mediaType);
+  const stored = await storage.put(storageKey, file.bytes, file.mediaType);
 
   try {
+    let createdAttachment: Attachment | null = null;
     const document = await prisma.$transaction(async (tx) => {
       const attachment = await tx.attachment.create({
         data: {
@@ -1712,10 +1783,12 @@ export async function createOrganizationDocument(
           storageProvider: storage.providerName,
           storageKey,
           checksumSha256,
+          ...scanInitFields(storage.providerName, stored),
           description: input.description?.trim() || null,
           uploadedByAuthIdentityId: actorAuthIdentityId,
         },
       });
+      createdAttachment = attachment;
       const document = await tx.organizationDocument.create({
         data: {
           organizationId,
@@ -1755,6 +1828,10 @@ export async function createOrganizationDocument(
       organizationId,
       actorId: actorAuthIdentityId,
     });
+    // A scan event may have beaten the commit — apply it now.
+    if (createdAttachment) {
+      await applyPreArrivedScanEventsSafely(createdAttachment);
+    }
     return document;
   } catch (error) {
     try {
@@ -1798,9 +1875,10 @@ export async function addOrganizationDocumentVersion(
   const displayFilename = sanitizeDisplayFilename(file.name);
   const checksumSha256 = createHash("sha256").update(file.bytes).digest("hex");
   const storageKey = newAttachmentStorageKey(document.organizationId);
-  await storage.put(storageKey, file.bytes, file.mediaType);
+  const stored = await storage.put(storageKey, file.bytes, file.mediaType);
 
   try {
+    let createdAttachment: Attachment | null = null;
     const version = await prisma.$transaction(async (tx) => {
       // Re-check inside the transaction — an archive landing between the
       // outer check and this commit must not win the race.
@@ -1822,9 +1900,11 @@ export async function addOrganizationDocumentVersion(
           storageProvider: storage.providerName,
           storageKey,
           checksumSha256,
+          ...scanInitFields(storage.providerName, stored),
           uploadedByAuthIdentityId: actorAuthIdentityId,
         },
       });
+      createdAttachment = attachment;
       const version = await tx.organizationDocumentVersion.create({
         data: {
           organizationId: document.organizationId,
@@ -1854,6 +1934,10 @@ export async function addOrganizationDocumentVersion(
       actorId: actorAuthIdentityId,
       versionNumber: version.versionNumber,
     });
+    // A scan event may have beaten the commit — apply it now.
+    if (createdAttachment) {
+      await applyPreArrivedScanEventsSafely(createdAttachment);
+    }
     return version;
   } catch (error) {
     try {
@@ -1907,6 +1991,7 @@ export async function finalizeDocumentCreate(
 
   const displayFilename = sanitizeDisplayFilename(declared.name);
   try {
+    let createdAttachment: Attachment | null = null;
     const document = await prisma.$transaction(async (tx) => {
       const attachment = await tx.attachment.create({
         data: {
@@ -1917,10 +2002,12 @@ export async function finalizeDocumentCreate(
           storageProvider: storage.providerName,
           storageKey: verified.finalKey,
           checksumSha256: verified.checksumSha256,
+          ...scanInitFields(storage.providerName, verified),
           description: input.description?.trim() || null,
           uploadedByAuthIdentityId: actorAuthIdentityId,
         },
       });
+      createdAttachment = attachment;
       const document = await tx.organizationDocument.create({
         data: {
           organizationId,
@@ -1960,6 +2047,10 @@ export async function finalizeDocumentCreate(
       organizationId,
       actorId: actorAuthIdentityId,
     });
+    // A scan event may have beaten the finalize — apply it now.
+    if (createdAttachment) {
+      await applyPreArrivedScanEventsSafely(createdAttachment);
+    }
     return document;
   } catch (error) {
     try {
@@ -2015,6 +2106,7 @@ export async function finalizeDocumentVersion(
 
   const displayFilename = sanitizeDisplayFilename(declared.name);
   try {
+    let createdAttachment: Attachment | null = null;
     const version = await prisma.$transaction(async (tx) => {
       // Re-check inside the transaction — an archive landing between the
       // outer check and this commit must not win the race.
@@ -2036,9 +2128,11 @@ export async function finalizeDocumentVersion(
           storageProvider: storage.providerName,
           storageKey: verified.finalKey,
           checksumSha256: verified.checksumSha256,
+          ...scanInitFields(storage.providerName, verified),
           uploadedByAuthIdentityId: actorAuthIdentityId,
         },
       });
+      createdAttachment = attachment;
       const version = await tx.organizationDocumentVersion.create({
         data: {
           organizationId: document.organizationId,
@@ -2068,6 +2162,10 @@ export async function finalizeDocumentVersion(
       actorId: actorAuthIdentityId,
       versionNumber: version.versionNumber,
     });
+    // A scan event may have beaten the finalize — apply it now.
+    if (createdAttachment) {
+      await applyPreArrivedScanEventsSafely(createdAttachment);
+    }
     return version;
   } catch (error) {
     try {
