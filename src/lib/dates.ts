@@ -61,21 +61,35 @@ export function formatDateOnly(d: Date | null | undefined): string | null {
 }
 
 /**
- * Compact "how long ago" label for a timestamp ("updated 2 hours ago").
+ * Compact relative label for a timestamp ("updated 2 hours ago",
+ * "expires in 7 days"). Past values render "N units ago", future values
+ * "in N units" — future timestamps like expiry times are valid inputs.
  * Exact instants, not calendar dates — an instant is unambiguous
  * regardless of which organization's zone it is displayed in, so this
- * deliberately takes no timezone. Beyond a month the absolute date is
- * clearer than a large day count.
+ * deliberately takes no timezone. Beyond a month either direction the
+ * absolute date is clearer than a large day count.
  */
 export function relativeTimeLabel(date: Date, now: Date = new Date()): string {
-  const elapsedSeconds = Math.round((now.getTime() - date.getTime()) / 1000);
-  if (elapsedSeconds < 60) return "just now";
-  const minutes = Math.floor(elapsedSeconds / 60);
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const elapsedMs = now.getTime() - date.getTime();
+  // Check the raw diff, not the rounded seconds: Math.round can produce
+  // -0 for a sub-500ms future instant, and -0 < 0 is false.
+  const future = elapsedMs < 0;
+  const elapsedSeconds = Math.round(elapsedMs / 1000);
+  if (Math.abs(elapsedSeconds) < 60) {
+    // A sub-minute FUTURE instant still differs from "just now" — an
+    // expiry reading "just now" looks already-expired.
+    return future ? "in a few seconds" : "just now";
+  }
+  const suffix = (n: number, unit: string) =>
+    future
+      ? `in ${n} ${unit}${n === 1 ? "" : "s"}`
+      : `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+  const minutes = Math.floor(Math.abs(elapsedSeconds) / 60);
+  if (minutes < 60) return suffix(minutes, "minute");
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  if (hours < 24) return suffix(hours, "hour");
   const days = Math.floor(hours / 24);
-  if (days < 31) return `${days} day${days === 1 ? "" : "s"} ago`;
+  if (days < 31) return suffix(days, "day");
   return formatDateOnly(date) ?? "";
 }
 
@@ -201,4 +215,18 @@ export function formatInstantInZone(
     timeStyle: "short",
     timeZone,
   }).format(date);
+}
+
+/**
+ * Expiry display shared by the admin member page and the public /invite
+ * page: relative context plus the absolute instant in the
+ * organization's own zone, e.g.
+ * "in 7 days — Oct 22, 2027, 9:30 PM (America/Kralendijk)".
+ */
+export function instantExpiryLabel(
+  date: Date,
+  timeZone: string,
+  now: Date = new Date(),
+): string {
+  return `${relativeTimeLabel(date, now)} — ${formatInstantInZone(date, timeZone)} (${timeZone})`;
 }

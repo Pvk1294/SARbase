@@ -5,6 +5,7 @@ import {
   daysBetween,
   formatDateOnly,
   formatInstantInZone,
+  instantExpiryLabel,
   instantInZone,
   isValidTimeZone,
   localDateTimeString,
@@ -160,6 +161,97 @@ describe("relativeTimeLabel", () => {
       "2027-09-01",
     );
   });
+
+  it("describes future timestamps as upcoming — never 'just now' or 'ago'", () => {
+    // The original defect: a freshly issued invitation expiry (7 days
+    // out) rendered "just now" because future dates fell through to the
+    // sub-minute branch.
+    // Sub-minute future reads as upcoming, not "just now" — an expiry
+    // displaying "just now" looked already-expired.
+    expect(relativeTimeLabel(INSTANT("2027-11-14T12:00:30.000Z"), now)).toBe(
+      "in a few seconds",
+    );
+    // Sub-500ms future rounds to -0 seconds, and -0 < 0 is false — the
+    // raw diff must decide the direction.
+    expect(relativeTimeLabel(INSTANT("2027-11-14T12:00:00.300Z"), now)).toBe(
+      "in a few seconds",
+    );
+    expect(relativeTimeLabel(INSTANT("2027-11-14T12:15:00.000Z"), now)).toBe(
+      "in 15 minutes",
+    );
+    expect(relativeTimeLabel(INSTANT("2027-11-14T13:00:00.000Z"), now)).toBe(
+      "in 1 hour",
+    );
+    expect(relativeTimeLabel(INSTANT("2027-11-15T06:00:00.000Z"), now)).toBe(
+      "in 18 hours",
+    );
+    expect(relativeTimeLabel(INSTANT("2027-11-21T12:00:00.000Z"), now)).toBe(
+      "in 7 days",
+    );
+    expect(relativeTimeLabel(INSTANT("2027-11-16T12:00:00.000Z"), now)).toBe(
+      "in 2 days",
+    );
+    // Beyond a month the absolute date is clearer, same as the past.
+    expect(relativeTimeLabel(INSTANT("2028-03-01T12:00:00.000Z"), now)).toBe(
+      "2028-03-01",
+    );
+  });
+});
+
+describe("instantExpiryLabel", () => {
+  // Shared by the admin member page and the public /invite page.
+  const now = INSTANT("2027-11-14T12:00:00.000Z");
+
+  it("newly issued invitation: relative + absolute org-zone expiry", () => {
+    // 7 days out, the PR66 invitation lifetime.
+    expect(
+      instantExpiryLabel(
+        INSTANT("2027-11-21T12:00:00.000Z"),
+        "America/Kralendijk",
+        now,
+      ),
+    ).toBe("in 7 days — Nov 21, 2027, 8:00 AM (America/Kralendijk)");
+  });
+
+  it("nearly expired still reads as upcoming with the absolute time", () => {
+    expect(
+      instantExpiryLabel(
+        INSTANT("2027-11-14T12:15:00.000Z"),
+        "America/Kralendijk",
+        now,
+      ),
+    ).toBe("in 15 minutes — Nov 14, 2027, 8:15 AM (America/Kralendijk)");
+  });
+
+  it("an expired instant is past-relative, never 'just now'", () => {
+    const label = instantExpiryLabel(
+      INSTANT("2027-11-13T12:00:00.000Z"),
+      "America/Kralendijk",
+      now,
+    );
+    expect(label).toContain("ago");
+    expect(label).not.toContain("just now");
+    expect(label).toContain("America/Kralendijk");
+  });
+
+  it("renders the absolute instant in the organization's own zone", () => {
+    // 00:30 UTC Nov 21 is still Nov 20 evening in Kralendijk (UTC-4).
+    expect(
+      instantExpiryLabel(
+        INSTANT("2027-11-21T00:30:00.000Z"),
+        "America/Kralendijk",
+        now,
+      ),
+    ).toContain("Nov 20, 2027, 8:30 PM");
+    // The same instant is Nov 21 in a zone east of UTC.
+    expect(
+      instantExpiryLabel(
+        INSTANT("2027-11-21T00:30:00.000Z"),
+        "Pacific/Auckland",
+        now,
+      ),
+    ).toContain("Nov 21, 2027, 1:30 PM");
+  });
 });
 
 describe("instantInZone / localDateTimeString (incident wall times)", () => {
@@ -212,5 +304,25 @@ describe("instantInZone / localDateTimeString (incident wall times)", () => {
       formatInstantInZone(INSTANT("2026-09-15T02:00:00.000Z"), "UTC"),
     ).toBe("Sep 15, 2026, 2:00 AM");
     expect(formatInstantInZone(null, "UTC")).toBeNull();
+  });
+
+  it("formats the same instant honestly per zone — day boundaries and DST", () => {
+    // An invitation expiry at 01:30 UTC is the previous evening in the
+    // organization's zone — the absolute display must not say
+    // "Oct 22" when the member sees Oct 21 local.
+    const instant = INSTANT("2027-10-22T01:30:00.000Z");
+    expect(formatInstantInZone(instant, "UTC")).toBe("Oct 22, 2027, 1:30 AM");
+    expect(formatInstantInZone(instant, "America/Kralendijk")).toBe(
+      "Oct 21, 2027, 9:30 PM",
+    );
+    // DST-aware: the same wall clock format shifts with the offset.
+    const summer = INSTANT("2027-07-01T12:00:00.000Z");
+    const winter = INSTANT("2027-12-01T12:00:00.000Z");
+    expect(formatInstantInZone(summer, "America/New_York")).toBe(
+      "Jul 1, 2027, 8:00 AM",
+    );
+    expect(formatInstantInZone(winter, "America/New_York")).toBe(
+      "Dec 1, 2027, 7:00 AM",
+    );
   });
 });

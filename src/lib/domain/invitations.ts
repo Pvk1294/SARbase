@@ -153,6 +153,7 @@ export function getMemberInvitation(memberId: string) {
               status: true,
               attemptedAt: true,
               errorSummary: true,
+              providerMessageId: true,
             },
             orderBy: { attemptNumber: "asc" },
           },
@@ -183,7 +184,7 @@ export async function getInvitationForToken(presentedToken: string) {
           authIdentityId: true,
         },
       },
-      organization: { select: { name: true } },
+      organization: { select: { name: true, timezone: true } },
     },
   });
   if (!invitation) return null;
