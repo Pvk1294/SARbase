@@ -507,8 +507,9 @@ export async function updateOrganizationAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/organizations/${organizationId}`);
-  revalidatePath("/admin");
+  revalidatePath(`/admin/organizations/${organizationId}/settings`);
+  revalidatePath(`/org/${organizationId}`);
+  revalidatePath("/org");
   return {};
 }
 
@@ -522,7 +523,7 @@ export async function setSetupChecklistDismissedAction(
   requireOrgAdmin(ctx, organizationId);
 
   await setSetupChecklistDismissed(organizationId, dismissed);
-  revalidatePath(`/admin/organizations/${organizationId}`);
+  revalidatePath(`/org/${organizationId}`);
 }
 
 export async function createUnitAction(
@@ -554,7 +555,8 @@ export async function createUnitAction(
         }
       : mapped;
   }
-  revalidatePath(`/admin/organizations/${organizationId}`);
+  revalidatePath(`/admin/organizations/${organizationId}/units`);
+  revalidatePath(`/org/${organizationId}`);
   return {};
 }
 
@@ -588,7 +590,9 @@ export async function updateUnitAction(
         }
       : mapped;
   }
-  revalidatePath(`/admin/organizations/${unit.organizationId}`);
+  revalidatePath(`/admin/organizations/${unit.organizationId}/units`);
+  revalidatePath(`/org/${unit.organizationId}`);
+  revalidatePath(`/admin/organizations/${unit.organizationId}/members`);
   return {};
 }
 
@@ -613,7 +617,9 @@ export async function createMemberAction(
   if (!parsed.success) return zodErrors(parsed.error);
 
   const member = await createMember(organizationId, parsed.data);
-  redirect(`/admin/members/${member.id}`);
+  redirect(
+    `/admin/organizations/${member.organizationId}/members/${member.id}`,
+  );
 }
 
 export async function updateMemberAction(
@@ -642,8 +648,11 @@ export async function updateMemberAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/members/${memberId}`);
-  revalidatePath(`/admin/organizations/${member.organizationId}`);
+  revalidatePath(
+    `/admin/organizations/${member.organizationId}/members/${memberId}`,
+  );
+  revalidatePath(`/admin/organizations/${member.organizationId}/members`);
+  revalidatePath(`/org/${member.organizationId}`);
   return {};
 }
 
@@ -660,8 +669,11 @@ export async function setMemberStatusAction(
   if (!parsed.success) return;
 
   await setMemberStatus(memberId, parsed.data);
-  revalidatePath(`/admin/members/${memberId}`);
-  revalidatePath(`/admin/organizations/${member.organizationId}`);
+  revalidatePath(
+    `/admin/organizations/${member.organizationId}/members/${memberId}`,
+  );
+  revalidatePath(`/admin/organizations/${member.organizationId}/members`);
+  revalidatePath(`/org/${member.organizationId}`);
 }
 
 export async function setMemberUnitsAction(
@@ -687,8 +699,11 @@ export async function setMemberUnitsAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/members/${memberId}`);
-  revalidatePath(`/admin/organizations/${member.organizationId}`);
+  revalidatePath(
+    `/admin/organizations/${member.organizationId}/members/${memberId}`,
+  );
+  revalidatePath(`/admin/organizations/${member.organizationId}/members`);
+  revalidatePath(`/org/${member.organizationId}`);
   return {};
 }
 
@@ -795,7 +810,9 @@ export async function linkIdentityToMemberAction(
     authIdentityId: identity.id,
   });
 
-  revalidatePath(`/admin/members/${memberId}`);
+  revalidatePath(
+    `/admin/organizations/${member.organizationId}/members/${memberId}`,
+  );
   return {};
 }
 
@@ -817,7 +834,9 @@ export async function unlinkIdentityFromMemberAction(
     entityId: memberId,
     organizationId: member.organizationId,
   });
-  revalidatePath(`/admin/members/${memberId}`);
+  revalidatePath(
+    `/admin/organizations/${member.organizationId}/members/${memberId}`,
+  );
 }
 
 /**
@@ -857,7 +876,9 @@ export async function createMemberInvitationAction(
     return mapDomainError(error);
   }
 
-  revalidatePath(`/admin/members/${memberId}`);
+  revalidatePath(
+    `/admin/organizations/${member.organizationId}/members/${memberId}`,
+  );
   if (!result.delivered) {
     // The invitation exists — delivery failed (provider unconfigured,
     // rejected, or unavailable). Resend is the retry path.
@@ -888,7 +909,9 @@ export async function resendMemberInvitationAction(
     return mapDomainError(error);
   }
 
-  revalidatePath(`/admin/members/${invitation.memberId}`);
+  revalidatePath(
+    `/admin/organizations/${invitation.organizationId}/members/${invitation.memberId}`,
+  );
   if (!result.delivered) {
     return {
       notice:
@@ -916,7 +939,9 @@ export async function revokeMemberInvitationAction(
     return mapDomainError(error);
   }
 
-  revalidatePath(`/admin/members/${invitation.memberId}`);
+  revalidatePath(
+    `/admin/organizations/${invitation.organizationId}/members/${invitation.memberId}`,
+  );
   return {};
 }
 
@@ -957,7 +982,8 @@ export async function createQualificationDefinitionAction(
         }
       : mapped;
   }
-  revalidatePath(`/admin/organizations/${organizationId}`);
+  revalidatePath(`/admin/organizations/${organizationId}/qualifications`);
+  revalidatePath(`/org/${organizationId}`);
   return {};
 }
 
@@ -994,7 +1020,11 @@ export async function updateQualificationDefinitionAction(
         }
       : mapped;
   }
-  revalidatePath(`/admin/organizations/${definition.organizationId}`);
+  revalidatePath(
+    `/admin/organizations/${definition.organizationId}/qualifications`,
+  );
+  revalidatePath(`/org/${definition.organizationId}`);
+  revalidatePath(`/admin/organizations/${definition.organizationId}/expiring`);
   return {};
 }
 
@@ -1011,7 +1041,11 @@ export async function setQualificationDefinitionStatusAction(
   if (!parsed.success) return;
 
   await setQualificationDefinitionStatus(definitionId, parsed.data);
-  revalidatePath(`/admin/organizations/${definition.organizationId}`);
+  revalidatePath(
+    `/admin/organizations/${definition.organizationId}/qualifications`,
+  );
+  revalidatePath(`/org/${definition.organizationId}`);
+  revalidatePath(`/admin/organizations/${definition.organizationId}/expiring`);
 }
 
 export async function createMemberQualificationAction(
@@ -1020,8 +1054,9 @@ export async function createMemberQualificationAction(
   formData: FormData,
 ): Promise<ActionState> {
   const ctx = await requireAuth();
+  let member;
   try {
-    await requireOrgAdminForMember(ctx, memberId);
+    member = await requireOrgAdminForMember(ctx, memberId);
   } catch (error) {
     return mapDomainError(error);
   }
@@ -1041,7 +1076,9 @@ export async function createMemberQualificationAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/members/${memberId}`);
+  revalidatePath(
+    `/admin/organizations/${member.organizationId}/members/${memberId}`,
+  );
   return {};
 }
 
@@ -1074,7 +1111,9 @@ export async function updateMemberQualificationAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/members/${record.memberId}`);
+  revalidatePath(
+    `/admin/organizations/${record.organizationId}/members/${record.memberId}`,
+  );
   return {};
 }
 
@@ -1118,7 +1157,8 @@ export async function createTrainingEventAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/organizations/${organizationId}`);
+  revalidatePath(`/admin/organizations/${organizationId}/training`);
+  revalidatePath(`/org/${organizationId}`);
   return {};
 }
 
@@ -1143,8 +1183,11 @@ export async function updateTrainingEventAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/training/${eventId}`);
-  revalidatePath(`/admin/organizations/${event.organizationId}`);
+  revalidatePath(
+    `/admin/organizations/${event.organizationId}/training/${eventId}`,
+  );
+  revalidatePath(`/admin/organizations/${event.organizationId}/training`);
+  revalidatePath(`/org/${event.organizationId}`);
   return {};
 }
 
@@ -1161,8 +1204,11 @@ export async function setTrainingEventStatusAction(
   if (!parsed.success) return;
 
   await setTrainingEventStatus(eventId, parsed.data);
-  revalidatePath(`/admin/training/${eventId}`);
-  revalidatePath(`/admin/organizations/${event.organizationId}`);
+  revalidatePath(
+    `/admin/organizations/${event.organizationId}/training/${eventId}`,
+  );
+  revalidatePath(`/admin/organizations/${event.organizationId}/training`);
+  revalidatePath(`/org/${event.organizationId}`);
 }
 
 export async function setTrainingAttendanceAction(
@@ -1171,8 +1217,9 @@ export async function setTrainingAttendanceAction(
   formData: FormData,
 ): Promise<ActionState> {
   const ctx = await requireAuth();
+  let event;
   try {
-    await requireOrgAdminForTrainingEvent(ctx, eventId);
+    event = await requireOrgAdminForTrainingEvent(ctx, eventId);
   } catch (error) {
     return mapDomainError(error);
   }
@@ -1193,7 +1240,9 @@ export async function setTrainingAttendanceAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/training/${eventId}`);
+  revalidatePath(
+    `/admin/organizations/${event.organizationId}/training/${eventId}`,
+  );
   return {};
 }
 
@@ -1368,7 +1417,7 @@ async function assetDuplicateWarning(
       ]
         .filter(Boolean)
         .join(" — "),
-      href: `/admin/assets/${d.id}`,
+      href: `/admin/organizations/${organizationId}/assets/${d.id}`,
     })),
   };
 }
@@ -1401,7 +1450,7 @@ export async function createAssetAction(
   } catch (error) {
     return mapAssetError(error);
   }
-  redirect(`/admin/assets/${asset.id}`);
+  redirect(`/admin/organizations/${asset.organizationId}/assets/${asset.id}`);
 }
 
 export async function updateAssetAction(
@@ -1433,7 +1482,9 @@ export async function updateAssetAction(
   } catch (error) {
     return mapAssetError(error);
   }
-  revalidatePath(`/admin/assets/${assetId}`);
+  revalidatePath(
+    `/admin/organizations/${asset.organizationId}/assets/${assetId}`,
+  );
   revalidatePath(`/admin/organizations/${asset.organizationId}/assets`);
   return {};
 }
@@ -1513,8 +1564,10 @@ export async function updateInventoryItemAction(
 
 function revalidateMaintenance(orgId: string, assetId?: string) {
   revalidatePath(`/admin/organizations/${orgId}/maintenance`);
-  revalidatePath(`/admin/organizations/${orgId}`);
-  if (assetId) revalidatePath(`/admin/assets/${assetId}`);
+  revalidatePath(`/org/${orgId}`);
+  if (assetId) {
+    revalidatePath(`/admin/organizations/${orgId}/assets/${assetId}`);
+  }
 }
 
 export async function createInspectionDefinitionAction(
@@ -2102,8 +2155,11 @@ export async function setMemberAvailabilityAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/members/${member.id}`);
-  revalidatePath(`/admin/organizations/${member.organizationId}`);
+  revalidatePath(
+    `/admin/organizations/${member.organizationId}/members/${member.id}`,
+  );
+  revalidatePath(`/admin/organizations/${member.organizationId}/members`);
+  revalidatePath(`/org/${member.organizationId}`);
   return {};
 }
 
@@ -2133,7 +2189,9 @@ export async function updateMemberContactPreferenceAction(
   } catch (error) {
     return mapDomainError(error);
   }
-  revalidatePath(`/admin/members/${member.id}`);
+  revalidatePath(
+    `/admin/organizations/${member.organizationId}/members/${member.id}`,
+  );
   return {};
 }
 
@@ -2901,18 +2959,22 @@ function revalidateAttachmentTarget(
       );
       break;
     case "MEMBER_QUALIFICATION":
-      revalidatePath(`/admin/members/${String(target.memberId)}`);
+      revalidatePath(
+        `/admin/organizations/${orgId}/members/${String(target.memberId)}`,
+      );
       break;
     case "TRAINING_EVENT":
-      revalidatePath(`/admin/training/${entityId}`);
+      revalidatePath(`/admin/organizations/${orgId}/training/${entityId}`);
       break;
     case "ASSET":
-      revalidatePath(`/admin/assets/${entityId}`);
+      revalidatePath(`/admin/organizations/${orgId}/assets/${entityId}`);
       break;
     case "INSPECTION_RECORD":
     case "MAINTENANCE_RECORD":
     case "DEFECT":
-      revalidatePath(`/admin/assets/${String(target.assetId)}`);
+      revalidatePath(
+        `/admin/organizations/${orgId}/assets/${String(target.assetId)}`,
+      );
       break;
     case "EXPENSE":
       revalidatePath(`/admin/organizations/${orgId}/expenses/${entityId}`);
@@ -3339,7 +3401,7 @@ export async function deleteAttachmentAction(
       // The tombstone and DELETED event already committed — only the
       // physical object removal failed. Revalidate so the UI shows the
       // real state and report the honest partial outcome.
-      revalidatePath("/admin", "layout");
+      revalidatePath("/", "layout");
       return {
         message:
           "The file record was deleted, but the stored content could not be removed. It is recorded as failed deletion and can be retried.",
@@ -3349,7 +3411,7 @@ export async function deleteAttachmentAction(
   }
   // The attachment may be rendered on several record pages — clear the
   // admin section's data cache rather than guess which lists contain it.
-  revalidatePath("/admin", "layout");
+  revalidatePath("/", "layout");
   return {};
 }
 
