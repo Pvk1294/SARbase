@@ -100,7 +100,35 @@ backfill, then constrain/drop in a follow-up deploy.
 
 ## Migration discipline
 
-- Create migrations with `prisma migrate dev` against your LOCAL db.
+- Create migrations with `npm run db:migrate:dev` against your LOCAL db.
+  Destructive-capable Prisma commands (`migrate dev`, `migrate reset`,
+  `db push`) run through `scripts/migrate.ts`, which guards the target
+  before invoking the CLI (issue #88 — a raw `prisma migrate reset`
+  once wiped a shared database that `.env` happened to point at):
+  - Loopback targets proceed freely.
+  - `APP_PRODUCTION_DB_HOST` and `APP_TESTING_DB_HOST` are refused under
+    every invocation — `migrate dev`/`reset`/`push` never touch either.
+  - Any other remote host (a personal Neon dev branch) requires
+    `-- --confirm-host <exact-hostname>` matching the resolved target.
+  - Protected-host markers may be written as a bare hostname, a
+    `host:port` pair, or a full URL — all forms are resolved and
+    canonicalized before comparison, so Neon pooled (`-pooler`) and
+    unpooled spellings of a protected branch are equivalent, and a
+    trailing DNS dot can't dodge the match. The confirmation value, by
+    contrast, must equal the resolved target hostname exactly.
+  - The wrapper also reads the effective `--schema` and validates every
+    env var its `datasource` block resolves — a schema redirect can't
+    widen the checked surface.
+  - Accepted limitation: a loopback URL that tunnels to a remote
+    database (SSH port-forward, cloud proxy socket) is
+    indistinguishable from disposable local Postgres at the URL level.
+    If you run a tunnel, you are responsible for what it reaches.
+  - The database test suite applies the same guard to
+    `TEST_DATABASE_URL`; a remote test database needs
+    `TEST_DB_CONFIRM_HOST=<exact-hostname>`.
+  - Never run `npx prisma migrate dev|reset` or `npx prisma db push`
+    directly — the wrapper exists because the bare CLI trusts `.env`
+    silently.
 - **Never edit, rename, or delete an applied migration.** Reconcile by
   appending a new migration to the tail.
 - CI replays every migration onto an empty database (`migrate deploy`
