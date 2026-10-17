@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import type { ActionState } from "./actions";
 
@@ -48,6 +48,7 @@ export function NotificationTestSendForm({
   idempotencyKey: string;
 }) {
   const [state, formAction, pending] = useActionState(action, {});
+  const [channel, setChannel] = useState("EMAIL");
   return (
     <form action={formAction} className="space-y-3">
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
@@ -79,6 +80,32 @@ export function NotificationTestSendForm({
         <FieldError
           id="ntf-member-error"
           errors={state.fieldErrors?.memberId}
+        />
+      </div>
+      <div>
+        <label htmlFor="ntf-channel" className={labelClass}>
+          Channel
+        </label>
+        <select
+          id="ntf-channel"
+          name="channel"
+          value={channel}
+          onChange={(event) => setChannel(event.target.value)}
+          aria-invalid={Boolean(state.fieldErrors?.channel)}
+          aria-describedby="ntf-channel-error ntf-channel-hint"
+          className={inputClass}
+        >
+          <option value="EMAIL">Email</option>
+          <option value="WHATSAPP">WhatsApp</option>
+        </select>
+        <p id="ntf-channel-hint" className="mt-1 text-xs text-neutral-500">
+          WhatsApp requires a member recipient with live consent — it is a
+          template message, not the free-text body below. One-off addresses are
+          email only.
+        </p>
+        <FieldError
+          id="ntf-channel-error"
+          errors={state.fieldErrors?.channel}
         />
       </div>
       <div>
@@ -126,13 +153,19 @@ export function NotificationTestSendForm({
         <textarea
           id="ntf-body"
           name="body"
-          required
+          required={channel === "EMAIL"}
           rows={4}
           maxLength={4000}
           aria-invalid={Boolean(state.fieldErrors?.body)}
-          aria-describedby="ntf-body-error"
+          aria-describedby="ntf-body-error ntf-body-hint"
           className={inputClass}
         />
+        {channel === "WHATSAPP" && (
+          <p id="ntf-body-hint" className="mt-1 text-xs text-neutral-500">
+            WhatsApp sends render the approved admin_notice template from the
+            subject — this free-text body is stored in history only.
+          </p>
+        )}
         <FieldError id="ntf-body-error" errors={state.fieldErrors?.body} />
       </div>
       {state.message && (

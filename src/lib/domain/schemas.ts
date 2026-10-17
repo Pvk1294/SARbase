@@ -929,6 +929,10 @@ export const adminNotificationSendSchema = z
   .object({
     memberId: optionalId,
     destination: emailSchema,
+    // Issue #103 — a member-targeted test send may ride WHATSAPP (the
+    // member's consent + preference still gate it downstream). One-off
+    // destinations remain email-only.
+    channel: z.enum(["EMAIL", "WHATSAPP"]).default("EMAIL"),
     subject: z
       .string()
       .trim()
@@ -937,17 +941,35 @@ export const adminNotificationSendSchema = z
     body: z
       .string()
       .trim()
-      .min(1, "Message is required.")
-      .max(4000, "Keep the message under 4000 characters."),
+      .max(4000, "Keep the message under 4000 characters.")
+      .optional(),
     idempotencyKey: idempotencyKeySchema,
   })
   .check((ctx) => {
-    const { memberId, destination } = ctx.value;
+    const { memberId, destination, channel, body } = ctx.value;
     if ((memberId == null) === (destination == null)) {
       ctx.issues.push({
         code: "custom",
         message: "Choose a member or enter an email address — not both.",
         path: ["memberId"],
+        input: ctx.value,
+      });
+    }
+    if (destination != null && channel !== "EMAIL") {
+      ctx.issues.push({
+        code: "custom",
+        message: "WhatsApp test sends require a member recipient.",
+        path: ["channel"],
+        input: ctx.value,
+      });
+    }
+    // Email test sends deliver the free-text body; WhatsApp renders the
+    // admin_notice template from the subject, so the body is optional.
+    if (channel === "EMAIL" && !body) {
+      ctx.issues.push({
+        code: "custom",
+        message: "Message is required.",
+        path: ["body"],
         input: ctx.value,
       });
     }
