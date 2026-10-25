@@ -158,8 +158,11 @@ error.
   case), the webhook records the opt-out for every member whose stored
   phone number matches the sender, in every organization. It is
   audited as a `MemberContactChange` by the `whatsapp-webhook` actor,
-  and later WhatsApp sends to that member are suppressed with
-  `consent_missing`. Staff do not need to do anything. A message that
+  and a new WhatsApp notification to that member is suppressed with
+  `consent_missing`. A staff retry of a notification that was already
+  sent before the STOP is refused instead ("The member has opted out of
+  WhatsApp messages.") and keeps its earlier status. Staff do not need
+  to do anything. A message that
   merely contains the word ("can't stop now") is ignored. Code:
   `parseWhatsappWebhookBody` in
   [`src/lib/notifications/whatsapp-webhook.ts`](../src/lib/notifications/whatsapp-webhook.ts)
